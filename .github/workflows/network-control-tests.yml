@@ -20,8 +20,16 @@ permissions:
 jobs:
   regression:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shell: [bash, mksh]
+    env:
+      SURFING_TEST_SHELL: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install Android-compatible shell
+        if: matrix.shell == 'mksh'
+        run: sudo apt-get update && sudo apt-get install -y mksh
       - name: Check shell syntax
         run: |
           bash -n box_bll/scripts/ctr.inotify

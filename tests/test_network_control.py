@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASH = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
+TEST_SHELL = os.environ.get("SURFING_TEST_SHELL") or shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
 CHAINS = [("mangle", "BOX_LOCAL"), ("mangle", "BOX_EXTERNAL"),
           ("nat", "CLASH_DNS_LOCAL"), ("nat", "CLASH_DNS_EXTERNAL")]
 
@@ -105,7 +105,7 @@ class NetworkControlTests(unittest.TestCase):
         self.state_file.write_text(json.dumps(state))
 
     def invoke(self, force=True, event="w", wait=True):
-        args = [BASH, shell_path(self.script), event]
+        args = [TEST_SHELL, shell_path(self.script), event]
         if force:
             args.append("force")
         if not wait:
