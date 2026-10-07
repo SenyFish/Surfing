@@ -746,13 +746,14 @@ case "$1" in
 
     tun_forward_enable
     log Info "服务已启动完毕."
-    "${scripts_dir}/ctr.inotify" w >/dev/null 2>&1 &
+    "${scripts_dir}/ctr.inotify" w force >/dev/null 2>&1 &
     ;;
 
   disable)
     pgrep -f "$0 enable" | grep -v $$ | xargs kill -9 > /dev/null 2>&1
     log Warn "iptables: 正在执行全局卸载复位."
     destroy_all_rules
+    rm -f /dev/tmp/wifi_bypassed
     sleep 1
 
     if [ -f "${ipv6_disabled_flag}" ]; then
@@ -832,7 +833,7 @@ case "$1" in
 
     tun_forward_enable
     log Info "防火墙规则重构完毕，服务已恢复运行."
-   "${scripts_dir}/ctr.inotify" w >/dev/null 2>&1 &
+   "${scripts_dir}/ctr.inotify" w force >/dev/null 2>&1 &
     ;;
 
   enable_ipv6)
