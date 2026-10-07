@@ -2,6 +2,13 @@ name: Alpha
 run-name: ${{ github.event.head_commit.message || 'Scheduled Stats Update' }}
 
 on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/prerelease.yml'
+      - 'build.sh'
+      - 'module.prop'
+      - 'box_bll/**'
   push:
     branches:
       - main
@@ -13,6 +20,9 @@ permissions:
 
 jobs:
   Fetch-Data:
+    # Download metrics belong to the upstream data branch, which a new fork
+    # does not contain. They must not be a prerequisite for building a module.
+    if: github.repository == 'GitMetaio/Surfing' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Data Branch
@@ -63,8 +73,7 @@ jobs:
           git push origin data
 
   Prerelease-Build:
-    needs: Fetch-Data
-    if: ${{ github.event_name == 'push' }}
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     env:
@@ -76,7 +85,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           submodules: recursive
-          ref: main
+          ref: ${{ github.sha }}
 
       - name: Set Timestamp
         id: set_timestamp
@@ -88,20 +97,39 @@ jobs:
       - name: Run build.sh
         run: sh build.sh
 
+      - name: Verify module package
+        run: |
+          package="Surfing_alpha_${SHORT_HASH}.zip"
+          unzip -t "$package"
+          for entry in module.prop box_bll/bin/clash box_bll/bin/curl box_bll/bin/busybox box_bll/scripts/ctr.inotify SurfingTile.zip; do
+            unzip -Z1 "$package" | grep -Fx "$entry"
+          done
+          bash -n box_bll/scripts/ctr.inotify
+          bash -n box_bll/scripts/box.iptables
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Surfing-alpha-${{ env.SHORT_HASH }}
+          path: Surfing_alpha_${{ env.SHORT_HASH }}.zip
+          if-no-files-found: error
+
       - name: Delete current prerelease assets
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view Prerelease-Alpha --json assets --jq '.assets[].name' | xargs -I {} gh release delete-asset Prerelease-Alpha "{}" -y || echo "No assets to delete"
 
       - name: Tag Repo
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: richardsimko/update-tag@v3
         with:
           tag_name: Prerelease-Alpha
 
       - name: Upload Prerelease
         uses: softprops/action-gh-release@v3
-        if: success()
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
           tag_name: Prerelease-Alpha
           files: Surfing_alpha_${{ env.SHORT_HASH }}.zip
