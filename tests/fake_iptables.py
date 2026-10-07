@@ -49,7 +49,11 @@ def main():
     elif action == "-F":
         chains[key] = []
     elif action == "-X":
-        if chains[key] or any(f"-j {chain}" in rows for rows in chains.values()):
+        if chains[key] or any(
+            f"-j {chain}" in rows
+            for name, rows in chains.items()
+            if name.startswith(f"{family}:{table}:")
+        ):
             return 1
         del chains[key]
     else:
