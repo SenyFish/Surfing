@@ -106,6 +106,7 @@ zip -r -o -X "$filename" ./ \
     -x 'app/*' \
     -x '.git/*' \
     -x '.github/*' \
+    -x 'tests/*' \
     -x 'folder/*' \
     -x 'build.sh' \
     -x 'Surfing.json' \

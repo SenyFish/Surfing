@@ -1,0 +1,30 @@
+name: Network control regression tests
+
+on:
+  pull_request:
+    paths:
+      - 'box_bll/scripts/**'
+      - 'tests/**'
+      - '.github/workflows/network-control-tests.yml'
+  push:
+    branches: [main, 'fix/**']
+    paths:
+      - 'box_bll/scripts/**'
+      - 'tests/**'
+      - '.github/workflows/network-control-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: |
+          bash -n box_bll/scripts/ctr.inotify
+          bash -n box_bll/scripts/box.iptables
+      - name: Run network control regressions
+        run: python3 -m unittest discover -s tests -v

@@ -106,6 +106,7 @@ please update the `com.google.android.webview` component through the Google Play
 <summary>2. Controlling Operation</summary>
 
 - You can control start/stop via **WiFi SSID/MAC**.
+- With `bypass_via_iptables="true"`, network filtering bypasses traffic while the core remains running. Disabling the module manually takes priority over network filtering; enable it again to resume automatic control.
 - You can control service using the module toggle switch  
   `Changes take effect in real time, no reboot required`
 - You can add the module's control tile to the system status bar  

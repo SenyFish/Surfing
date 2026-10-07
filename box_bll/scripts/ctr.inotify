@@ -7,6 +7,7 @@ SYS_IP6TABLES="/system/bin/ip6tables"
 
 variab_dir="/dev/tmp/"
 module_dir="/data/adb/modules/Surfing"
+magisk -v 2>/dev/null | grep -q lite && module_dir="/data/adb/lite_modules/Surfing"
 disable_file="${module_dir}/disable"
 base_dir="/data/adb/box_bll"
 log_file="${base_dir}/run/net_debug.log"
@@ -17,23 +18,34 @@ scripts=$(realpath "$0")
 scripts_dir=$(dirname "${scripts}")
 
 events=$1
-[ "$events" != "w" ] && return
+[ "$events" != "w" ] && exit 0
+
+. "${scripts_dir}/box.config"
+[ "$enable_network_service_control" != "true" ] && exit 0
+
+# Only service-control mode owns the module disable file. In iptables mode it
+# is a manual override and must never be removed by a network transition.
+[ "$bypass_via_iptables" = "true" ] && [ -f "$disable_file" ] && exit 0
+
+mkdir -p "$variab_dir" "$run_path"
+# A kernel lock is released even if a handler is killed during an update.
+exec 9>"${variab_dir}/netfilter.lock"
+flock -x 9 || exit 1
+[ "$bypass_via_iptables" = "true" ] && [ -f "$disable_file" ] && exit 0
+
 if [ "$events" = "w" ]; then
     current_time=$(date +%s)
     last_time=$(cat "$last_check_file" 2>/dev/null)
     last_time=${last_time:-0}
-    if [ $((current_time - last_time)) -lt 2 ]; then
-        exit 0
+    if [ "$2" != "force" ] && [ $((current_time - last_time)) -lt 2 ]; then
+        # Read the final network state after a burst, rather than dropping it.
+        sleep 2
     fi
     echo "$current_time" > "$last_check_file"
 fi
 
-. "${scripts_dir}/box.config"
-
-[ "$enable_network_service_control" != "true" ] && exit 0
-
 get_current_bssid() {
-    local BSSID=$(dumpsys wifi | awk '
+    local BSSID=$(dumpsys wifi 2>/dev/null | awk '
         /mWifiInfo/ {
             if (match($0, /BSSID: [0-9a-fA-F:]{17}/)) {
                 s = substr($0, RSTART+7, 17)
@@ -183,6 +195,38 @@ fi
 
 date +%s > "$last_check_file"
 
+bypass_rules_present() {
+    local found=0 cmd table chain first_rule
+    for cmd in "$SYS_IPTABLES" "$SYS_IP6TABLES"; do
+        for table in mangle nat; do
+            for chain in BOX_LOCAL BOX_EXTERNAL CLASH_DNS_LOCAL CLASH_DNS_EXTERNAL; do
+                if "$cmd" -w 5 -t "$table" -S "$chain" >/dev/null 2>&1; then
+                    found=1
+                    # Bypass must precede the redirect/mark rules, not merely
+                    # exist somewhere later in the chain.
+                    first_rule=$("$cmd" -w 5 -t "$table" -S "$chain" 2>/dev/null | grep -m 1 '^-A ')
+                    [ "$first_rule" = "-A $chain -j NET_BYPASS" ] || return 1
+                    first_rule=$("$cmd" -w 5 -t "$table" -S NET_BYPASS 2>/dev/null | grep -m 1 '^-A ')
+                    [ "$first_rule" = "-A NET_BYPASS -j ACCEPT" ] || return 1
+                fi
+            done
+        done
+    done
+    [ "$found" = 1 ]
+}
+
+bypass_rules_absent() {
+    local cmd table chain
+    for cmd in "$SYS_IPTABLES" "$SYS_IP6TABLES"; do
+        for table in mangle nat; do
+            for chain in BOX_LOCAL BOX_EXTERNAL CLASH_DNS_LOCAL CLASH_DNS_EXTERNAL; do
+                "$cmd" -w 5 -t "$table" -C "$chain" -j NET_BYPASS >/dev/null 2>&1 && return 1
+            done
+        done
+    done
+    return 0
+}
+
 apply_wifi_bypass() {
     local state="$1"
     local target_chains="BOX_LOCAL BOX_EXTERNAL CLASH_DNS_LOCAL CLASH_DNS_EXTERNAL"
@@ -217,8 +261,11 @@ apply_wifi_bypass() {
         return 0
     fi
 
+    [ -f "$disable_file" ] && return 0
     if [ "$state" = "enable" ]; then
-        [ -f "${variab_dir}/wifi_bypassed" ] && return 0
+        if [ -f "${variab_dir}/wifi_bypassed" ] && bypass_rules_present; then
+            return 0
+        fi
         log_msg "[DEBUG] Bypass activated: Injecting Iptables rules..."
         for cmd in "${SYS_IPTABLES} -w 100" "${SYS_IP6TABLES} -w 100"; do
             for table in mangle nat filter; do
@@ -236,19 +283,30 @@ apply_wifi_bypass() {
                 done
             done
         done
-        rm -f "$disable_file" 
-        touch "${variab_dir}/wifi_bypassed"
-        log_msg "[INFO] Iptables bypass rules injected SUCCESS."
+        if bypass_rules_present; then
+            touch "${variab_dir}/wifi_bypassed"
+            log_msg "[INFO] Iptables bypass rules verified SUCCESS."
+        else
+            rm -f "${variab_dir}/wifi_bypassed"
+            log_msg "[ERROR] Iptables bypass rules incomplete; state not committed."
+            return 1
+        fi
     elif [ "$state" = "disable" ]; then
         clean_legacy_rules
-        rm -f "$disable_file"
-        rm -f "${variab_dir}/wifi_bypassed"
-        log_msg "[INFO] Iptables bypass rules cleaned SUCCESS."
+        if bypass_rules_absent; then
+            rm -f "${variab_dir}/wifi_bypassed"
+            log_msg "[INFO] Iptables bypass rules cleaned SUCCESS."
+        else
+            log_msg "[ERROR] Iptables bypass rules remain; state not committed."
+            return 1
+        fi
     fi
     return 0
 }
 
 check_module_service() {
+    # Every accepted event re-evaluates both WiFi and cellular policy.
+    force_refresh="true"
     if [ -f "${variab_dir}/wifi_bypassed" ] || { [ "$bypass_via_iptables" != "true" ] && [ -f "$disable_file" ]; }; then
         current_state="bypassed"
     else
