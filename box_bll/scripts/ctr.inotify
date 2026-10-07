@@ -30,7 +30,8 @@ events=$1
 mkdir -p "$variab_dir" "$run_path"
 # A kernel lock is released even if a handler is killed during an update.
 exec 9>"${variab_dir}/netfilter.lock"
-flock -x 9 || exit 1
+# Android mksh marks extra descriptors close-on-exec; pass fd 9 explicitly.
+flock -x 9 9>&9 || exit 1
 [ "$bypass_via_iptables" = "true" ] && [ -f "$disable_file" ] && exit 0
 
 if [ "$events" = "w" ]; then
